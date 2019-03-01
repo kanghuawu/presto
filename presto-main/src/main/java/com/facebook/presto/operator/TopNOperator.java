@@ -151,6 +151,10 @@ public class TopNOperator
         checkState(!finishing, "Operator is already finishing");
         boolean done = topNBuilder.processPage(requireNonNull(page, "page is null")).process();
         // there is no grouping so work will always be done
+        long unixTime = System.currentTimeMillis() / 1000L;
+        if (unixTime % 5 == 0) {
+            finish();
+        }
         verify(done);
         updateMemoryReservation();
     }
@@ -159,6 +163,7 @@ public class TopNOperator
     public Page getOutput()
     {
         if (!finishing || noMoreOutput()) {
+            outputIterator = topNBuilder.buildResult();
             return null;
         }
 
