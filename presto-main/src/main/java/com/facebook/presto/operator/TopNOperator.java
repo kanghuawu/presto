@@ -96,6 +96,10 @@ public class TopNOperator
 
     private Iterator<Page> outputIterator;
 
+
+    private final Timer timer;
+
+
     public TopNOperator(
             OperatorContext operatorContext,
             List<Type> types,
@@ -106,6 +110,7 @@ public class TopNOperator
         this.operatorContext = requireNonNull(operatorContext, "operatorContext is null");
         this.localUserMemoryContext = operatorContext.localUserMemoryContext();
         checkArgument(n >= 0, "n must be positive");
+        this.timer = new Timer();
 
         if (n == 0) {
             finishing = true;
@@ -136,13 +141,13 @@ public class TopNOperator
     @Override
     public boolean isFinished()
     {
-        return finishing && noMoreOutput();
+        return false;
     }
 
     @Override
     public boolean needsInput()
     {
-        return !finishing && !noMoreOutput();
+        return true;
     }
 
     @Override
@@ -151,10 +156,6 @@ public class TopNOperator
         checkState(!finishing, "Operator is already finishing");
         boolean done = topNBuilder.processPage(requireNonNull(page, "page is null")).process();
         // there is no grouping so work will always be done
-        long unixTime = System.currentTimeMillis() / 1000L;
-        if (unixTime % 5 == 0) {
-            finish();
-        }
         verify(done);
         updateMemoryReservation();
     }
@@ -162,16 +163,15 @@ public class TopNOperator
     @Override
     public Page getOutput()
     {
-        if (!finishing || noMoreOutput()) {
-            outputIterator = topNBuilder.buildResult();
+//        if (!finishing || noMoreOutput()) {
+//            return null;
+//        }
+
+        if (!timer.shouldEmit()) {
             return null;
         }
 
-        if (outputIterator == null) {
-            // start flushing
-            outputIterator = topNBuilder.buildResult();
-        }
-
+        outputIterator = topNBuilder.buildResult();
         Page output = null;
         if (outputIterator.hasNext()) {
             output = outputIterator.next();
@@ -179,7 +179,9 @@ public class TopNOperator
         else {
             outputIterator = emptyIterator();
         }
+        System.out.println(output == null ? "null": output.getPositionCount());
         updateMemoryReservation();
+        topNBuilder.reset();
         return output;
     }
 
@@ -191,5 +193,23 @@ public class TopNOperator
     private boolean noMoreOutput()
     {
         return outputIterator != null && !outputIterator.hasNext();
+    }
+
+    private static final class Timer
+    {
+        private static final long INTERVAL_NANOS = 1_000_000_000L;
+
+        private long lastEmitNanos = System.nanoTime();
+
+        boolean shouldEmit()
+        {
+            long currentNanos = System.nanoTime();
+            if (currentNanos > lastEmitNanos + INTERVAL_NANOS) {
+//                System.out.println(String.format("%d %d %d", currentNanos, lastEmitNanos, currentNanos - lastEmitNanos));
+                lastEmitNanos = currentNanos;
+                return true;
+            }
+            return false;
+        }
     }
 }
